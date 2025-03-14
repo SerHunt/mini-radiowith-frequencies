@@ -136,11 +136,7 @@
 // INCLUDE FILES
 // =================================
 
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <WebServer.h>
 #include <Wire.h>
-#include <NTPClient.h>
 #include <TFT_eSPI.h>            // https://github.com/Xinyuan-LilyGO/T-Display-S3#quick-start
 #include "EEPROM.h"
 #include <SI4735.h>
@@ -148,17 +144,13 @@
 #include "patch_init.h"          // SSB patch for whole SSBRX initialization string
 
 
-//Timezone Offset in seconds
-const long utcOffsetInSeconds = 7200;
-#define USE_SECRETS_FILE 1 // change to 0 if want to use ssid and password from this file
-#if USE_SECRETS_FILE
-#include "secrets.h"
-#else
-const char* ssid = "WiFi_SSID";
-const char* password =  "WiFi_Password";
-#endif
-WebServer server(80);
-int8_t isWifiEnabled = false;
+
+char *utcTime = NULL;
+char *stationName = NULL;
+char *programInformation = NULL;
+char *stationInfo = NULL;
+
+
 
 
 // =================================
@@ -202,7 +194,7 @@ int8_t isWifiEnabled = false;
 #define DEBUG4_PRINT 0        // Lowest level  - EEPROM
 
 // Remote Control
-#define USE_REMOTE 0          // Allows basic serial control and monitoring
+#define USE_REMOTE 1          // Allows basic serial control and monitoring
 
 // Tune hold off enable (0 = Disable, 1 = Enable)
 #define TUNE_HOLDOFF 1        // Whilst tuning holds off display update
@@ -210,22 +202,26 @@ int8_t isWifiEnabled = false;
 // Display position control
 // Added during development, code could be replaced with fixed values
 #define menu_offset_x    0    // Menu horizontal offset
-#define menu_offset_y   25    // Menu vertical offset
+#define menu_offset_y   20    // Menu vertical offset
 #define menu_delta_x    10    // Menu width delta
-#define meter_offset_x 185    // Meter horizontal offset
-#define meter_offset_y 115    // Meter vertical offset
-#define freq_offset_x  260    // Frequency horizontal offset
-#define freq_offset_y   75    // Frequency vertical offset
-#define funit_offset_x 265    // Frequency Unit horizontal offset
-#define funit_offset_y  55    // Frequency Unitvertical offset
-#define mode_offset_x   95    // Mode horizontal offset
-#define mode_offset_y  114    // Mode vertical offset  
+#define meter_offset_x  00    // Meter horizontal offset
+#define meter_offset_y   0    // Meter vertical offset
+#define freq_offset_x  250    // Frequency horizontal offset
+#define freq_offset_y   65    // Frequency vertical offset
+#define funit_offset_x 255    // Frequency Unit horizontal offset
+#define funit_offset_y  48    // Frequency Unit vertical offset
+#define band_offset_x  150    // Band horizontal offset
+#define band_offset_y    3    // Band vertical offset
+#define mode_offset_x   280    // Mode horizontal offset
+#define mode_offset_y  30    // Mode vertical offset
 #define vol_offset_x   120    // Volume horizontal offset
 #define vol_offset_y   150    // Volume vertical offset
-#define rds_offset_x    10    // RDS horizontal offset
-#define rds_offset_y   158    // RDS vertical offset
-#define batt_datum     240    // Battery meter x offset
-#define clock_datum      6    // Clock x offset
+#define rds_offset_x   165    // RDS horizontal offset
+#define rds_offset_y    94    // RDS vertical offset
+#define batt_datum     286    // Battery meter x offset
+#define clock_datum     70    // Clock x offset
+
+
 
 // Battery Monitoring
 #define BATT_ADC_READS          10  // ADC reads for average calculation (Maximum value = 16 to avoid rollover in average calculation)
@@ -242,7 +238,7 @@ int8_t isWifiEnabled = false;
 #define ELAPSED_CLICK         1500  // time to check the double click commands
 #define DEFAULT_VOLUME          35  // change it for your favorite sound volume
 #define STRENGTH_CHECK_TIME   1500  // Not used
-#define RDS_CHECK_TIME         250  // Increased from 90
+#define RDS_CHECK_TIME         100  // Increased from 90
 
 #define BACKGROUND_REFRESH_TIME 5000    // Background screen refresh time. Covers the situation where there are no other events causing a refresh
 #define TUNE_HOLDOFF_TIME         90    // Timer to hold off display whilst tuning
@@ -269,18 +265,19 @@ int8_t isWifiEnabled = false;
 #define AGC_ATT      6
 #define SOFTMUTE     7
 #define AVC          8
-#define SPARE1       9
-#define SEEKUP      10
-#define SEEKDOWN    11
-#define CALIBRATION 12
-#define BRIGHTNESS  13
+#define SEEKUP      9
+#define SEEKDOWN    10
+#define CALIBRATION 11
+#define BRIGHTNESS  12
 #if BFO_MENU_EN
 #define BFO         14
 #else
 #define SPARE2      14
 #endif
-#define WIFI        15
-#define SAVED       16
+#define SAVED       13
+
+
+
 
 
 #define TFT_MENU_BACK TFT_BLACK              // 0x01E9
@@ -336,7 +333,6 @@ bool cmdSoftMuteMaxAtt = false;
 bool cmdCal = false;
 bool cmdBrt = false;
 bool cmdAvc = false;
-bool cmdWifi = false;
 bool cmdSaved = false;
 
 bool fmRDS = false;
@@ -377,10 +373,17 @@ int8_t SsbSoftMuteIdx = 4;              // Default SSB = 4, range = 0 to 32
 
 // Button checking
 unsigned long pb1_timer = millis();     // Push button timer
-int pb1_current;                        // Push button current state
-int pb1_last;                           // Push button last state (after debounce)
-uint16_t pb1_shift;                     // Debounce shift register
+unsigned long pb1_time = 0;             // Push button timer
+unsigned long pb1_edge_time = 0;        // Push button edge time
+unsigned long pb1_pressed_time = 0;     // Push button pressed time
+unsigned long pb1_released_time = 0;    // Push button released time
+int pb1_current = HIGH;                 // Push button current state
+int pb1_stable = HIGH;                  // Push button stable state
+int pb1_last = HIGH;                    // Push button last state (after debounce)
 bool pb1_pressed = false;               // Push button pressed
+bool pb1_long_pressed = false;          // Push button long pressed
+
+bool display_on = true;                 // Display state
 
 // Status bar icon flags
 bool screen_toggle = false;             // Toggle when drawsprite is called
@@ -411,6 +414,7 @@ uint8_t time_seconds = 0;
 uint8_t time_minutes = 0;
 uint8_t time_hours = 0;
 char time_disp [16];
+char picode_disp [16];
 
 // Remote serial
 #if USE_REMOTE
@@ -424,20 +428,18 @@ uint8_t g_remote_seqnum = 0;
 // Menu Description
 #if BFO_MENU_EN
 // With BFO           <---- 00 ----> <---- 01 ----> <---- 02 ----> <---- 03 ----> <---- 04 ----> <---- 05 ----> <---- 06 ----> <---- 07 ----> <---- 08 ----> <---- 09 ---->
-const char *menu[] = {    "Band",        "Mode",       "Volume",       "Step",     "Bandwidth",      "Mute",      "AGC/ATTN",    "SoftMute",       "AVC",       "Spare 1",
+const char *menu[] = {    "Band",        "Mode",       "Volume",       "Step",     "Bandwidth",      "Mute",      "AGC/ATTN",    "SoftMute",       "AVC",  
 
 
-//                    <---- 10 ----> <---- 11 ----> <---- 12 ----> <---- 13 ----> <---- 14 ----> 
+//                    <---- 10 ----> <---- 11 ----> <---- 12 ----> <---- 13 ----> <---- 14 ---->
                          "Seek Up",     "Seek Dn",   "Calibration", "Brightness",     "BFO"     };
 
 
 #else
 // Without BFO        <---- 00 ----> <---- 01 ----> <---- 02 ----> <---- 03 ----> <---- 04 ----> <---- 05 ----> <---- 06 ----> <---- 07 ----> <---- 08 ----> <---- 09 ---->
-const char *menu[] = {    "Band",        "Mode",       "Volume",       "Step",     "Bandwidth",      "Mute",      "AGC/ATTN",    "SoftMute",       "AVC",       "Spare 1",
-
-//                    <---- 10 ----> <---- 11 ----> <---- 12 ----> <---- 13 ----> <---- 14 ----> <---- 15 ----> <---- 16 ---->
-                         "Seek Up",     "Seek Dn",   "Calibration", "Brightness",    "Spare 2",      "Wifi",       "Saved"    };
-
+const char *menu[] = {    "Band",        "Mode",       "Volume",       "Step",     "Bandwidth",      "Mute",      "AGC/ATTN",    "SoftMute",       "AVC",    
+//                    <---- 10 ----> <---- 11 ----> <---- 12 ----> <---- 13 ----> <---- 14 ----> <---- 15 ---->
+                         "Seek Up",     "Seek Dn",   "Calibration", "Brightness",    "Saved"    };
 #endif
 
 int8_t menuIdx = VOLUME;
@@ -525,10 +527,6 @@ const char *bandModeDesc[] = {"FM", "LSB", "USB", "AM"};
 const int lastBandModeDesc = (sizeof bandModeDesc / sizeof(char *)) - 1;
 uint8_t currentMode = FM;
 
-const char *wifiDesc[] = {"OFF", "ON"};
-const int lastWifiDesc = (sizeof wifiDesc / sizeof(char *)) - 1;
-uint8_t wifiIdx = 0;
-
 typedef struct
 {
   const char *name;
@@ -563,6 +561,40 @@ savedFreqs savedDesc[] = {
   { "Nezalezhnist", FM_BAND_TYPE, 10670 },
   { "Bayraktar",    FM_BAND_TYPE, 10720 },
 };
+
+// savedFreqs savedDesc[] = {
+//   { "> Curr",       FM_BAND_TYPE, 10000 },
+//   { "EMMANUIL",     FM_BAND_TYPE, 6920 },
+//   { "MARIYA",       FM_BAND_TYPE, 6983 },
+//   { "BAYRAKTAR",    FM_BAND_TYPE, 8800 },
+//   { "Radio ROCKS",  FM_BAND_TYPE, 8930 },
+//   { "Reb-music",    FM_BAND_TYPE, 8960 },
+//   { "RELAX",        FM_BAND_TYPE, 9000 },
+//   { "AVTO RADIO",   FM_BAND_TYPE, 9040 },
+//   { "MFM",          FM_BAND_TYPE, 9120 },
+//   { "KULTURA",      FM_BAND_TYPE, 9160 },
+//   { "NAKIPILO",     FM_BAND_TYPE, 9220 },
+//   { "Slobozhanske", FM_BAND_TYPE, 9310 },
+//   { "Voroge Radio", FM_BAND_TYPE, 9630 },
+//   { "NOVOLINE",     FM_BAND_TYPE, 9710 },
+//   { "PROMIN",       FM_BAND_TYPE, 10050 },
+//   { "ARMY-FM",      FM_BAND_TYPE, 10110 },
+//   { "PEREC-FM",     FM_BAND_TYPE, 10150 },
+//   { "HIT-FM",       FM_BAND_TYPE, 10200 },
+//   { "KISS-FM",      FM_BAND_TYPE, 10240 },
+//   { "P'iatnytsia",  FM_BAND_TYPE, 10300 },
+//   { "SHLAGER",      FM_BAND_TYPE, 10350 },
+//   { "MAXIMUM",      FM_BAND_TYPE, 10400 },
+//   { "NASHE",        FM_BAND_TYPE, 10450 },
+//   { "LUX-FM",       FM_BAND_TYPE, 10520 },
+//   { "POWER-FM",     FM_BAND_TYPE, 10570 },
+//   { "UKRRADIO",     FM_BAND_TYPE, 10610 },
+//   { "DJFM",         FM_BAND_TYPE, 10660 },
+//   { "Radio NV",     FM_BAND_TYPE, 10700 },
+//   { "KRAYNA-FM",    FM_BAND_TYPE, 10740 },
+//   { "MELODIYA-FM",  FM_BAND_TYPE, 10790 },
+// };
+
 const int lastSavedDesc = (sizeof savedDesc / sizeof(savedFreqs)) - 1;
 uint8_t savedIdx = 0;
 
@@ -593,7 +625,7 @@ Band band[] = {
     {"VHF", FM_BAND_TYPE, 6400, 10800, 10390, 1, 0},
     {"MW1", MW_BAND_TYPE, 150, 1720, 810, 3, 4},
     {"MW2", MW_BAND_TYPE, 531, 1701, 783, 2, 4},
-    {"MW2", MW_BAND_TYPE, 1700, 3500, 2500, 1, 4},
+    {"MW3", MW_BAND_TYPE, 1700, 3500, 2500, 1, 4},
     {"80M", MW_BAND_TYPE, 3500, 4000, 3700, 0, 4},
     {"SW1", SW_BAND_TYPE, 4000, 5500, 4885, 1, 4},
     {"SW2", SW_BAND_TYPE, 5500, 6500, 6000, 1, 4},
@@ -629,7 +661,6 @@ int16_t bandCAL[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 uint8_t bandMODE[] = {FM, AM, AM, AM, LSB, AM, AM, LSB, AM, AM, AM, AM, USB, AM, AM, USB, AM, AM, USB, AM};
 
 char *rdsMsg;
-char *stationName;
 char *rdsTime;
 char bufferStationName[50];
 char bufferRdsMsg[100];
@@ -696,19 +727,18 @@ TFT_eSprite spr = TFT_eSprite(&tft);
 
 SI4735 rx;
 
+void showUtcTime() {
+  if (utcTime != NULL) {
+      Serial.print("UTC Time: ");
+      Serial.println(utcTime);
+  }
+}
 
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
-
-int hours = 0;
-int minutes = 0;
 
 void setup()
 {
   // Enable Serial. G8PTN: Added
   Serial.begin(115200);
-  delay(1000);
 
   // Audio Amplifier Enable. G8PTN: Added
   // Initally disable the audio amplifier until the SI4732 has been setup
@@ -750,14 +780,14 @@ void setup()
   uint16_t ver_major = (app_ver / 100);
   uint16_t ver_minor = (app_ver % 100);
   char fw_ver [16];
-  sprintf(fw_ver, "F/W: v%1.1d.%2.2d", ver_major, ver_minor);
-  tft.println("ATS-Mini Receiver");
-  tft.println(fw_ver);
-  tft.println();
-  tft.println("To reset EEPROM");
-  tft.println("Press+Hold ENC Button");
-  
-  delay(3000);
+  //sprintf(fw_ver, "F/W: v%1.1d.%2.2d", ver_major, ver_minor);
+  // tft.println("ATS-Mini Receiver");
+  // tft.println(fw_ver);
+  // tft.println();
+  // tft.println("To reset EEPROM");
+  // tft.println("Press+Hold ENC Button");
+  // tft.println();     
+  delay(500);
 
   // EEPROM
   // Note: Use EEPROM.begin(EEPROM_SIZE) before use and EEPROM.begin.end after use to free up memory and avoid memory leaks
@@ -850,19 +880,7 @@ void setup()
   else {
     saveAllReceiverInformation();                        // Set EEPROM to defaults
     rx.setVolume(volume);                                // Set initial volume after EEPROM reset
-    ledcWrite(0, currentBrt);                            // Set initial brightness after EEPROM reset
-  }
-
-  wifiIdx = isWifiEnabled;
-  if (isWifiEnabled) {
-    WiFi.mode(WIFI_STA); //Optional
-    WiFi.begin(ssid, password);
-    Serial.println("\nConnecting");
-
-    server.on("/", handle_OnConnect);
-    server.onNotFound(handle_NotFound);
-    server.begin();
-    Serial.println("HTTP server started");
+    ledcWrite(0, currentBrt);                           // Set initial brightness after EEPROM reset
   }
 
   // Debug
@@ -980,9 +998,6 @@ void saveAllReceiverInformation()
     EEPROM.commit();
   }  
 
-  EEPROM.write(addr_offset++,  isWifiEnabled);
-  EEPROM.commit();
-
   addr_offset = eeprom_ver_address;  
   EEPROM.write(addr_offset++, app_ver >> 8);            // Stores app_ver (HIGH byte)
   EEPROM.write(addr_offset++, app_ver & 0XFF);          // Stores app_ver (LOW byte)
@@ -1036,8 +1051,6 @@ void readAllReceiverInformation()
     bandCAL[i]   |= EEPROM.read(addr_offset++);           // Reads stored Calibration value (LOW byte) per band
     bandMODE[i]   = EEPROM.read(addr_offset++);           // Reads stored Mode value per band
   }
-
-  isWifiEnabled   = EEPROM.read(addr_offset++);
 
   EEPROM.end();
 
@@ -1121,7 +1134,6 @@ void disableCommands()
   cmdCal = false;
   cmdBrt = false;
   cmdAvc = false;
-  cmdWifi = false;
   cmdSaved = false;
 }
 
@@ -1299,6 +1311,8 @@ void useBand()
     rx.setFMDeEmphasis(1);
     rx.RdsInit();
     rx.setRdsConfig(1, 2, 2, 2, 2);
+    //rx.setRdsConfig(3, 3, 3, 3, 3);
+    //rx.setFifoCount(1);
     rx.setGpioCtl(1,0,0);   // G8PTN: Enable GPIO1 as output
     rx.setGpio(0,0,0);      // G8PTN: Set GPIO1 = 0
   }
@@ -1899,11 +1913,6 @@ void doCurrentMenuCmd() {
       showAvc(); 
       break;
 
-    case WIFI:
-    cmdWifi = true;
-    drawSprite();
-    break;
-
     case SAVED:
       cmdSaved = true;
       drawSprite();
@@ -1921,7 +1930,7 @@ void doCurrentMenuCmd() {
  * Return true if the current status is Menu command
  */
 bool isMenuMode() {
-  return (cmdMenu | cmdStep | cmdBandwidth | cmdAgc | cmdVolume | cmdSoftMuteMaxAtt | cmdMode | cmdBand | cmdCal | cmdBrt | cmdAvc | cmdWifi | cmdSaved);     // G8PTN: Added cmdBand, cmdCal, cmdBrt and cmdAvc
+  return (cmdMenu | cmdStep | cmdBandwidth | cmdAgc | cmdVolume | cmdSoftMuteMaxAtt | cmdMode | cmdBand | cmdCal | cmdBrt | cmdAvc | cmdSaved);     // G8PTN: Added cmdBand, cmdCal, cmdBrt and cmdAvc
 }
 
 uint8_t getStrength() {
@@ -1976,23 +1985,28 @@ void drawMenu() {
     //spr.drawString("Menu",38+menu_offset_x+(menu_delta_x/2),14+menu_offset_y,2);
     spr.drawString(label_menu,38+menu_offset_x+(menu_delta_x/2),14+menu_offset_y,2);
     
-    spr.setTextFont(0);
-    spr.setTextColor(0xBEDF,TFT_MENU_BACK);
+    //spr.setTextFont(0);
+    spr.setTextColor(TFT_WHITE,TFT_BLACK);
     spr.fillRoundRect(6+menu_offset_x,24+menu_offset_y+(2*16),66+menu_delta_x,16,2,0x105B);
     for(int i=-2;i<3;i++){
       if (i==0) spr.setTextColor(0xBEDF,0x105B);
       else spr.setTextColor(0xBEDF,TFT_MENU_BACK);
       spr.drawString(menu[abs((menuIdx+lastMenu+1+i)%(lastMenu+1))],38+menu_offset_x+(menu_delta_x/2),64+menu_offset_y+(i*16),2);
+      spr.setTextColor(TFT_WHITE,TFT_MENU_BACK);
+
     }
   } else {
-    spr.setTextColor(TFT_WHITE,TFT_MENU_BACK);    
-    spr.fillSmoothRoundRect(1+menu_offset_x,1+menu_offset_y,76+menu_delta_x,110,4,TFT_RED);
+        spr.fillSmoothRoundRect(1+menu_offset_x,1+menu_offset_y,76+menu_delta_x,110,4,TFT_RED);
     spr.fillSmoothRoundRect(2+menu_offset_x,2+menu_offset_y,74+menu_delta_x,108,4,TFT_MENU_BACK);
     spr.drawString(menu[menuIdx],38+menu_offset_x+(menu_delta_x/2),14+menu_offset_y,2);
-    spr.setTextFont(0);
-    spr.setTextColor(0xBEDF,TFT_MENU_BACK);
+    //spr.setTextFont(0);
+    //spr.setTextColor(0xBEDF,TFT_MENU_BACK);
+    spr.setTextColor(TFT_WHITE,TFT_BLACK);
+
     // spr.fillRect(6,24+(2*16),67,16,0xBEDF);
     spr.fillRoundRect(6+menu_offset_x,24+menu_offset_y+(2*16),66+menu_delta_x,16,2,0x105B);
+        spr.setTextColor(TFT_WHITE,TFT_BLACK);
+
 
     //G8PTN: Added to reduce calls to getLastStep()
     int temp_LastStep = getLastStep();
@@ -2028,14 +2042,6 @@ void drawMenu() {
       if (cmdSaved) {
         spr.drawString(savedDesc[abs((savedIdx+lastSavedDesc+1+i)%(lastSavedDesc+1))].name,38+menu_offset_x+(menu_delta_x/2),64+menu_offset_y+(i*16),2);
       }
-    }
-    if (cmdWifi) {
-      spr.fillRoundRect(6+menu_offset_x,24+menu_offset_y+16,66+menu_delta_x,16,2,wifiIdx ? TFT_MENU_BACK : 0x105B);
-      spr.setTextColor(0xBEDF,wifiIdx ? TFT_MENU_BACK : 0x105B);
-      spr.drawString(wifiDesc[0],38+menu_offset_x+(menu_delta_x/2),64+menu_offset_y-16,2);
-      spr.fillRoundRect(6+menu_offset_x,24+menu_offset_y+(2*16),66+menu_delta_x,16,2,wifiIdx ? 0x105B : TFT_MENU_BACK);
-      spr.setTextColor(0xBEDF,wifiIdx ? 0x105B : TFT_MENU_BACK);
-      spr.drawString(wifiDesc[1],38+menu_offset_x+(menu_delta_x/2),64+menu_offset_y,2);
     }
     if (cmdVolume) {
       spr.setTextColor(0xBEDF,TFT_MENU_BACK);
@@ -2092,12 +2098,7 @@ void drawMenu() {
   }
 }
 
-bool isWifiEnabledAndActive(void)
-{
-  if (isWifiEnabled == true && WiFi.status() == WL_CONNECTED)
-    return true;
-  return false;
-}
+
 
 // G8PTN: Alternative layout
 void drawSprite()
@@ -2106,53 +2107,53 @@ void drawSprite()
   spr.setTextColor(TFT_WHITE,TFT_BLACK);
 
   // Status bar
-  spr.fillRect(0,0,320,22,TFT_BLUE);
+  spr.fillRect(0,0,320,22,TFT_BLACK);
+
+  // Pi Code
+  spr.setTextColor(TFT_WHITE,TFT_BLACK);
+  spr.setTextDatum(ML_DATUM);
+  spr.drawString(picode_disp,clock_datum+110,12,2);
+  spr.setTextColor(TFT_WHITE,TFT_BLACK);
 
   // Time
-  spr.setTextColor(TFT_WHITE,TFT_BLUE);
+  spr.setTextColor(TFT_WHITE,TFT_BLACK);
   spr.setTextDatum(ML_DATUM);
   spr.drawString(time_disp,clock_datum,12,2);
   spr.setTextColor(TFT_WHITE,TFT_BLACK);
 
-  // Screen activity icon
-  screen_toggle = !screen_toggle;
-  spr.drawCircle(clock_datum+50,11,6,TFT_WHITE);
-  if (screen_toggle) spr.fillCircle(clock_datum+50,11,5,TFT_BLACK);
-  else               spr.fillCircle(clock_datum+50,11,5,TFT_GREEN);  
 
-  // EEPROM write request icon
-  spr.drawCircle(clock_datum+70,11,6,TFT_WHITE);
-  if (eeprom_wr_flag){
-    spr.fillCircle(clock_datum+70,11,5,TFT_RED);
-    eeprom_wr_flag = false;
-  }
-  else spr.fillCircle(clock_datum+70,11,5,TFT_BLACK); 
-
-  // Wifi address
-  spr.setTextDatum(ML_DATUM);
-  uint16_t wifi_text_color = TFT_BLUE;
-  String wifi_text = "Wifi disabled";
-  if (isWifiEnabled == true) {
-    if (isWifiEnabledAndActive()) {
-      wifi_text_color = TFT_BLUE;
-      wifi_text = WiFi.localIP().toString();
-    } else {
-      wifi_text_color = TFT_RED;
-      wifi_text = "no wifi";
-    }
-  }
-  spr.setTextColor(TFT_CYAN,wifi_text_color);
-  spr.drawString(wifi_text,clock_datum+90,12,2);
-  spr.setTextColor(TFT_WHITE,TFT_BLACK);
+  // RSSI
+  uint8_t rssi_value = rx.getCurrentRSSI();  // Get RSSI value
+  char rssi_str[10];  
+  sprintf(rssi_str, "RSSI: %u", rssi_value);  // Convert to string
   
+
+  spr.setTextColor(TFT_WHITE,TFT_BLACK);
+  spr.setTextDatum(ML_DATUM);
+  spr.drawString(rssi_str,clock_datum+45,12,2);
+  spr.setTextColor(TFT_WHITE,TFT_BLACK);
+
+  // // Screen activity icon
+  // screen_toggle = !screen_toggle;
+  // spr.drawCircle(clock_datum+50,11,6,TFT_WHITE);
+  // if (screen_toggle) spr.fillCircle(clock_datum+50,11,5,TFT_BLACK);
+  // else               spr.fillCircle(clock_datum+50,11,5,TFT_GREEN);  
+
+  // // EEPROM write request icon
+  // spr.drawCircle(clock_datum+70,11,6,TFT_WHITE);
+  // if (eeprom_wr_flag){
+  //   spr.fillCircle(clock_datum+70,11,5,TFT_RED);
+  //   eeprom_wr_flag = false;
+  // }
+  // else spr.fillCircle(clock_datum+70,11,5,TFT_BLACK); 
+
   if (currentMode == FM) {
     spr.setTextDatum(MR_DATUM);
     spr.drawFloat(currentFrequency/100.00,2,freq_offset_x,freq_offset_y,7);
     spr.setTextDatum(ML_DATUM);
-    spr.drawString("MHz",funit_offset_x,funit_offset_y,4);
+    spr.drawString("MHz",funit_offset_x,funit_offset_y);
     spr.setTextDatum(MC_DATUM);
-  }
-  else {
+  } else {
     spr.setTextDatum(MR_DATUM);
     if (isSSB()) {
       uint32_t freq  = (uint32_t(currentFrequency) * 1000) + currentBFO;
@@ -2164,15 +2165,13 @@ void drawSprite()
       sprintf(stail, ".%3.3d", tail);
       spr.drawString(skhz,freq_offset_x,freq_offset_y,7);
       spr.setTextDatum(ML_DATUM);
-      spr.drawString(stail,5+freq_offset_x,15+freq_offset_y,4);   
-    }
-    else {
+      spr.drawString(stail,5+freq_offset_x,15+freq_offset_y,4);
+    } else {
       spr.drawNumber(currentFrequency,freq_offset_x,freq_offset_y,7);
       spr.setTextDatum(ML_DATUM);
       spr.drawString(".000",5+freq_offset_x,15+freq_offset_y,4);
-     
     }
-    spr.drawString("kHz",funit_offset_x,funit_offset_y,4); 
+    spr.drawString("kHz",funit_offset_x,funit_offset_y);
     spr.setTextDatum(MC_DATUM);
   }
   
@@ -2212,7 +2211,10 @@ void drawSprite()
       spr.drawString("ATTN:",6+menu_offset_x,64+menu_offset_y+(1*16),2);        
       spr.drawString(sAgc,48+menu_offset_x,64+menu_offset_y+(1*16),2);
     }
+//////////////////////////////////////////////////////
 
+
+/////////////////
     /*
     spr.drawString("BFO:",6+menu_offset_x,64+menu_offset_y+(2*16),2);
     if (isSSB()) {
@@ -2245,56 +2247,96 @@ void drawSprite()
   }
 
 
+
   // S-Meter
-  for(int i=0;i<getStrength();i++)
+  spr.drawTriangle(meter_offset_x + 1, meter_offset_y + 1, meter_offset_x + 11, meter_offset_y + 1, meter_offset_x + 6, meter_offset_y + 6, TFT_LIGHTGREY);
+  spr.drawLine(meter_offset_x + 6, meter_offset_y + 1, meter_offset_x + 6, meter_offset_y + 14, TFT_LIGHTGREY);
+  for(int i=0; i<getStrength(); i++)
     if (i<10)
-      // Option 1 - Variable heaght bars
-      //spr.fillRect(244+(i*4),80-(i*1),2,4+(i*1),0x3526);
-      // Option 2 - Fixed heaght bars
-      //spr.fillRect(1+meter_offset_x+(i*8),1+meter_offset_y,3,20,0x3526);     // Option 2a 
-      spr.fillRect(1+meter_offset_x+(i*8),1+meter_offset_y,3,20,TFT_GREEN);    // Option 2b
+      spr.fillRect(15+meter_offset_x + (i*4), 2+meter_offset_y, 2, 12, TFT_GREEN);
     else
-      // Option 1 - Variable heaght bars
-      //spr.fillRect(244+(i*4),80-(i*1),2,4+(i*1),TFT_RED);
-      // Option 2 - Fixed heaght bars
-      spr.fillRect(1+meter_offset_x+(i*8),1+meter_offset_y,3,20,TFT_RED);
+      spr.fillRect(15+meter_offset_x + (i*4), 2+meter_offset_y, 2, 12, TFT_RED);
 
-  // S-Meter Scale
-  //spr.drawLine(1+meter_offset_x,25+meter_offset_y,5+meter_offset_x+(15*8),25+meter_offset_y,TFT_DARKGREY);  // Option 2a
-  //spr.setTextColor(TFT_DARKGREY,TFT_BLACK);                                                                 // Option 2a
-  spr.drawLine(1+meter_offset_x,25+meter_offset_y,5+meter_offset_x+(15*8),25+meter_offset_y,TFT_WHITE);       // Option 2b
-  spr.setTextColor(TFT_WHITE,TFT_BLACK);                                                                      // Option 2b
+   if (currentMode == FM) {
+    //  if (rx.getCurrentPilot()) {
+    //    spr.fillRect(15 + meter_offset_x, 7+meter_offset_y, 4*17, 2, TFT_BLACK);
+    //  }
+
+      //spr.setTextColor(TFT_MAGENTA,TFT_BLACK);
+      spr.setTextColor(TFT_WHITE,TFT_BLACK);
+     spr.setTextDatum(TC_DATUM);
+     spr.drawString(bufferStationName, rds_offset_x, rds_offset_y, 4);
+     spr.setTextDatum(MC_DATUM);
+      spr.setTextColor(TFT_WHITE,TFT_BLACK);
+   }
+
+      // Tuner scale
+      spr.fillTriangle(156, 122, 160, 132, 164, 122, TFT_RED);
+      spr.drawLine(160, 124, 160, 169, TFT_RED);
   
-  spr.drawString("S",1+meter_offset_x,45+meter_offset_y,2);
-  for(int i=0;i<16;i++)
-    {
-      if (i%2) {
-        //spr.drawLine(2+meter_offset_x+(i*8),25+meter_offset_y,2+meter_offset_x+(i*8),35+meter_offset_y,TFT_DARKGREY);  // Option 2a
-        spr.drawLine(2+meter_offset_x+(i*8),25+meter_offset_y,2+meter_offset_x+(i*8),35+meter_offset_y,TFT_WHITE);       // Option 2b
-        if (i < 10)  spr.drawNumber(i,2+meter_offset_x+(i*8),45+meter_offset_y,2);
-        if (i == 13) spr.drawString("+40",2+meter_offset_x+(i*8),45+meter_offset_y,2);
+      spr.setTextDatum(MC_DATUM);
+      int temp;
+      if (isSSB()) {
+        temp = (currentFrequency + currentBFO/1000)/10.00 - 20;
+      } else {
+        temp = currentFrequency/10.00 - 20;
       }
-    }
-  spr.setTextColor(TFT_WHITE,TFT_BLACK);
+      uint16_t lineColor;
+      for(int i=0;i<40;i++)
+        {
+          if (i==20) lineColor=TFT_RED;
+          else lineColor=0xC638;
+          if (!(temp<band[bandIdx].minimumFreq/10.00 or temp>band[bandIdx].maximumFreq/10.00)) {
+            if((temp%10)==0){
+              spr.drawLine(i*8, 169, i*8, 150, lineColor);
+              spr.drawLine((i*8)+1, 169, (i*8)+1, 150, lineColor);
+              if (currentMode == FM) spr.drawFloat(temp/10.0, 1, i*8, 140, 2);
+              else if (temp >= 100) spr.drawFloat(temp/100.0, 3, i*8, 140, 2);
+              else spr.drawNumber(temp*10, i*8, 140, 2);
+            } else if((temp%5)==0 && (temp%10)!=0) {
+              spr.drawLine(i*8, 169, i*8, 155, lineColor);
+              spr.drawLine((i*8)+1, 169, (i*8)+1, 155, lineColor);
+            } else {
+              spr.drawLine(i*8, 169, i*8, 160, lineColor);
+            }
+          }
+          temp += 1;
+        }
 
+
+  #define mode_radius                 8
 
   if (currentMode == FM) {
-    spr.fillSmoothRoundRect(1+mode_offset_x,1+mode_offset_y,76,22,4,TFT_WHITE);
-    spr.fillSmoothRoundRect(2+mode_offset_x,2+mode_offset_y,74,20,4,TFT_BLACK);
-    if (rx.getCurrentPilot()) {
-      //spr.setTextColor(TFT_RED,TFT_BLACK);                                       // STEREO Option 1
-      spr.fillSmoothRoundRect(2+mode_offset_x,2+mode_offset_y,74,20,4,TFT_RED);    // STEREO Option 2
-      spr.setTextColor(TFT_WHITE,TFT_RED);                                         // STEREO Option 2
-      spr.drawString("STEREO",38+mode_offset_x,11+mode_offset_y,2);
-      spr.setTextColor(TFT_WHITE,TFT_BLACK);
-    } else spr.drawString("MONO",38+mode_offset_x,11+mode_offset_y,2);
 
-    // spr.setTextColor(TFT_MAGENTA,TFT_BLACK);
-    spr.setTextDatum(ML_DATUM);
-    spr.drawString(bufferStationName,rds_offset_x,rds_offset_y,4);
-    spr.setTextDatum(MC_DATUM);
-    // spr.setTextColor(TFT_WHITE,TFT_BLACK);    
+    
+    if (rx.getCurrentPilot()) {
+      // Stereo: two intertwined circles
+      spr.drawSmoothCircle(mode_offset_x - mode_radius/2, mode_offset_y, mode_radius, TFT_RED, TFT_BLACK);
+      spr.drawSmoothCircle(mode_offset_x + mode_radius/2, mode_offset_y, mode_radius, TFT_RED, TFT_BLACK);
+    }
+    // else {
+    //   // Mono: one white circle
+    //   spr.drawSmoothCircle(mode_offset_x, mode_offset_y, mode_radius, TFT_WHITE, TFT_BLACK);
+    // }
   }
+
+
+  //   spr.fillSmoothRoundRect(1+mode_offset_x,1+mode_offset_y,76,22,4,TFT_WHITE);
+  //   spr.fillSmoothRoundRect(2+mode_offset_x,2+mode_offset_y,74,20,4,TFT_BLACK);
+  //   if (rx.getCurrentPilot()) {
+  //     //spr.setTextColor(TFT_RED,TFT_BLACK);                                       // STEREO Option 1
+  //     spr.fillSmoothRoundRect(2+mode_offset_x,2+mode_offset_y,74,20,4,TFT_RED);    // STEREO Option 2
+  //     spr.setTextColor(TFT_WHITE,TFT_RED);                                         // STEREO Option 2
+  //     spr.drawString("STEREO",38+mode_offset_x,11+mode_offset_y,2);
+  //     spr.setTextColor(TFT_WHITE,TFT_BLACK);
+  //   } else spr.drawString("MONO",38+mode_offset_x,11+mode_offset_y,2);
+
+  //   // spr.setTextColor(TFT_MAGENTA,TFT_BLACK);
+  //   spr.setTextDatum(ML_DATUM);
+  //   spr.drawString(bufferStationName,rds_offset_x,rds_offset_y,4);
+  //   spr.setTextDatum(MC_DATUM);
+  //   // spr.setTextColor(TFT_WHITE,TFT_BLACK);    
+  // }
     /*
     else {
     spr.fillSmoothRoundRect(1+mode_offset_x,1+mode_offset_y,76,22,4,TFT_WHITE);
@@ -2419,56 +2461,126 @@ void batteryMonitor() {
     Serial.print("ADC voltage (average) = "); Serial.println(adc_volt_avr);
     #endif
 
-  // SOC display information
+    #define batt_offset_x             288
+    #define batt_offset_y               5
+    #define batt_width                 24
+    #define batt_height                14
+    #define batt_padding                3    // Padding between battery outline and charge level inside
+          // SOC display information
   // Variable: chargeLevel = pixel width, batteryLevelColor = Colour of level
   int chargeLevel;
   uint16_t batteryLevelColor;
 
   if (batt_soc_state == 0 ) {
-    chargeLevel=7;
     batteryLevelColor=TFT_RED;
   }
   if (batt_soc_state == 1 ) {
-    chargeLevel=14;
     batteryLevelColor=TFT_GREEN;
   }
   if (batt_soc_state == 2 ) {
-    chargeLevel=21;
     batteryLevelColor=TFT_GREEN;
   }
   if (batt_soc_state == 3 ) {
-    chargeLevel=28;
     batteryLevelColor=TFT_GREEN;
   }
 
   // Set display information
-  spr.fillRect(batt_datum,5,30,14,TFT_WHITE);
-  spr.fillRect(batt_datum + 1,6,28,12,TFT_BLACK);
-  spr.fillRect(batt_datum + 30,7,3,10,TFT_WHITE);
-  spr.fillRect(batt_datum + 1,6,chargeLevel,12,batteryLevelColor);
+  // Battery outline.
+  spr.drawRoundRect(
+          batt_offset_x, batt_offset_y,
+          batt_width,    batt_height,
+          2,
+          batteryLevelColor);
+  // Battery plus pin.
+  spr.drawLine(
+          batt_offset_x + batt_width + 2, batt_offset_y + 3,
+          batt_offset_x + batt_width + 2, batt_offset_y + batt_height - 3,
+          batteryLevelColor);
 
-  spr.setTextColor(TFT_WHITE,TFT_BLUE);
+  // Charge level
+  spr.fillRect(
+          batt_offset_x + batt_padding,                               batt_offset_y + batt_padding,
+          (batt_width - batt_padding * 2) * (batt_soc_state + 1) / 4, batt_height - batt_padding * 2,
+          batteryLevelColor);
+
+  spr.setTextColor(TFT_WHITE, TFT_BLACK);
   spr.setTextDatum(ML_DATUM);
 
   // The hardware has a load sharing circuit to allow simultaneous charge and power
   // With USB(5V) connected the voltage reading will be approx. VBUS - Diode Drop = 4.65V
   // If the average voltage is greater than 4.3V, show "EXT" on the display
-  if (adc_volt_avr > 4.3) {
-    spr.drawString("EXT",batt_datum + 45,12,2);
+  if (adc_volt_avr > 4.2) {
+    //spr.drawString("EXT", batt_offset_x - 30, 12, 2);
+     //spr.fillRect(batt_datum + 1, 2, 28, 12, TFT_BLUE);
+     spr.fillTriangle(batt_datum + 6, 11, batt_datum + 16, 11, batt_datum + 16, 8, TFT_RED);
+     spr.fillTriangle(batt_datum + 23, 12, batt_datum + 13, 12, batt_datum + 13, 15, TFT_RED);
   }
   else {
-    spr.drawFloat(adc_volt_avr,2,batt_datum + 37,12,2);
-    spr.drawString("V",batt_datum + 70,12,2);
+    spr.drawFloat(adc_volt_avr, 2, batt_offset_x - 45, 12, 2);
+    spr.drawString("V", batt_offset_x - 13, 12, 2);
   }
 
-  // Debug
-  //spr.drawNumber(batt_soc_state,batt_datum - 10,12,2);
 
   spr.setTextColor(TFT_WHITE,TFT_BLACK);
   spr.setTextDatum(MC_DATUM);
-  //spr.pushSprite(0,0);            // G8PTN: Not needed
-  
 }
+
+
+
+
+//   // SOC display information
+//   // Variable: chargeLevel = pixel width, batteryLevelColor = Colour of level
+//   int chargeLevel;
+//   uint16_t batteryLevelColor;
+
+//   if (batt_soc_state == 0 ) {
+//     chargeLevel=7;
+//     batteryLevelColor=TFT_RED;
+//   }
+//   if (batt_soc_state == 1 ) {
+//     chargeLevel=14;
+//     batteryLevelColor=TFT_GREEN;
+//   }
+//   if (batt_soc_state == 2 ) {
+//     chargeLevel=21;
+//     batteryLevelColor=TFT_GREEN;
+//   }
+//   if (batt_soc_state == 3 ) {
+//     chargeLevel=28;
+//     batteryLevelColor=TFT_GREEN;
+//   }
+
+//   // Set display information
+//   spr.fillRect(batt_datum, 1, 30, 14, TFT_WHITE);
+//   spr.fillRect(batt_datum + 30, 3, 3, 10, TFT_WHITE);
+
+//   spr.setTextColor(TFT_WHITE, TFT_BLACK);
+//   spr.setTextDatum(TR_DATUM);
+
+//   // The hardware has a load sharing circuit to allow simultaneous charge and power
+//   // With USB(5V) connected the voltage reading will be approx. VBUS - Diode Drop = 4.65V
+//   // If the average voltage is greater than 4.3V, show ligtning on the display
+//   if (adc_volt_avr > 4.3) {
+//     spr.fillRect(batt_datum + 1, 2, 28, 12, TFT_BLUE);
+//     spr.fillTriangle(batt_datum + 6, 7, batt_datum + 16, 7, batt_datum + 16, 4, TFT_YELLOW);
+//     spr.fillTriangle(batt_datum + 23, 8, batt_datum + 13, 8, batt_datum + 13, 11, TFT_YELLOW);
+//   }
+//   else {
+//     char voltage[8];
+//     spr.fillRect(batt_datum + 1, 2, 28, 12, TFT_BLACK);
+//     spr.fillRect(batt_datum + 1, 2, chargeLevel, 12, batteryLevelColor);
+//     sprintf(voltage, "%.02fV", adc_volt_avr);
+//     spr.drawString(voltage, batt_datum - 3, 0, 2);
+//   }
+
+//   // Debug
+//   //spr.drawNumber(batt_soc_state,batt_datum - 10,12,2);
+
+//   spr.setTextColor(TFT_WHITE,TFT_BLACK);
+//   spr.setTextDatum(MC_DATUM);
+//   //spr.pushSprite(0,0);            // G8PTN: Not needed
+// }
+
 
 
 /***************************************************************************************
@@ -2677,21 +2789,6 @@ void showAvc()
 drawSprite();
 }
 
-void doWifi(int8_t v)
-{
-  wifiIdx = (v == 1) ? wifiIdx + 1 : wifiIdx - 1;
-
-  if ((int8_t)wifiIdx > lastWifiDesc) {
-    wifiIdx = lastWifiDesc;
-  } else if ((int8_t)wifiIdx < 0)
-  wifiIdx = 0;
-
-  isWifiEnabled = wifiIdx;
-
-  drawSprite();
-  delay(MIN_ELAPSED_TIME); // waits a little more for releasing the button.
-}
-
 void doSaved(int8_t v)
 {
   savedIdx = (v == 1) ? savedIdx + 1 : savedIdx - 1;
@@ -2713,38 +2810,96 @@ void doSaved(int8_t v)
   delay(MIN_ELAPSED_TIME); // waits a little more for releasing the button.
 }
 
-void button_check()
-{
+void button_check() {
   // G8PTN: Added
   // Push button detection
   // Only execute every 10 ms
-  if ((millis() - pb1_timer) > 10) {
-    pb1_timer = millis();  
-    pb1_current = digitalRead(ENCODER_PUSH_BUTTON);              // Read pin value
-    pb1_shift = (pb1_shift << 1 ) | (pb1_current) | 0xFF00;      // Shift register
-  
-    if ((pb1_shift == 0xFF00) && (pb1_last == 0)) {              // Falling edge
-      pb1_last = 1;
-      pb1_pressed = true;
-
-      // Debug
-      #if DEBUG2_PRINT
-      Serial.println("Info: button_check() >>> Button Pressed");
-      #endif
+  if ((millis() - pb1_time) > 10) {
+    pb1_time = millis();
+    pb1_current = digitalRead(ENCODER_PUSH_BUTTON);     // Read pin value
+    if (pb1_last != pb1_current) {
+      pb1_edge_time = millis();
+      pb1_last = pb1_current;
     }
 
-    else if ((pb1_shift == 0xFFFF) && (pb1_last == 1)) {         // Rising edge
-      pb1_last = 0;
-
-      // Debug
-      #if DEBUG2_PRINT
-      Serial.println("Info: button_check() >>> Button Released");
-      #endif
+    if ((millis() - pb1_edge_time) > 100) {
+      if (pb1_stable == HIGH && pb1_last == LOW) {       // button is pressed
+        // Debug
+        #if DEBUG2_PRINT
+        Serial.println("Info: button_check() >>> Button Pressed");
+        #endif
+        pb1_pressed_time = pb1_edge_time;
+        pb1_stable = pb1_current;
+      } else if (pb1_stable == LOW && pb1_last == HIGH) {       // button is released
+        // Debug
+        #if DEBUG2_PRINT
+        Serial.println("Info: button_check() >>> Button Released");
+        #endif
+        pb1_released_time = pb1_edge_time;
+        pb1_stable = pb1_current;
+        long pb1_press_duration = pb1_released_time - pb1_pressed_time;
+        if (pb1_press_duration < 500) {
+          pb1_pressed = true;
+          #if DEBUG2_PRINT
+          Serial.println("Info: button_check() >>> Short Press triggered");
+          #endif
+        } else {
+          pb1_long_pressed = true;
+          #if DEBUG2_PRINT
+          Serial.println("Info: button_check() >>> Long Press triggered");
+          #endif
+        }
+      }
     }
   }
 }
 
-void clock_time()
+void displayOff() {
+  tft.writecommand(ST7789_DISPOFF);
+  ledcWrite(0, 0);
+  }
+
+void displayOn() {
+ tft.writecommand(ST7789_DISPON);
+ ledcWrite(0, currentBrt);
+}
+
+uint16_t lastPiCode = 0;  // Stores the last valid PI Code
+bool hasPiCode = false;   // Flag to track if we have received a valid PI code
+uint16_t lastFreq = 0;    // Stores the last tuned frequency to detect station change
+
+void rdsShowPiCode()
+{
+    uint16_t currentFreq = rx.getFrequency();  // Get the current tuned frequency
+    uint16_t piCode = rx.getRdsPI();  // Read the PI code
+
+    // Check if the station has changed
+    if (currentFreq != lastFreq)  
+    {
+        lastFreq = currentFreq;  // Update the stored frequency
+        lastPiCode = 0;          // Reset PI code buffer
+        hasPiCode = false;       // Clear PI code flag
+    }
+
+    // Update PI code only if we get a valid one
+    if ((piCode != 0) && (currentMode == FM))
+    {
+        lastPiCode = piCode;
+        hasPiCode = true;
+    }
+
+    // Display PI code if available, otherwise show empty placeholder
+    if (hasPiCode) 
+    {
+        sprintf(picode_disp, "PI: %04X", lastPiCode);
+    } 
+    else 
+    {
+        sprintf(picode_disp, "");  // Placeholder when no valid data
+    }
+}
+
+  void clock_time()
 {
   if ((micros() - clock_timer) >= 1000000) {
     clock_timer = micros();
@@ -2777,7 +2932,7 @@ void loop()
   // Check if the encoder has moved.
   if (encoderCount != 0)
   {
-    // G8PTN: The manual BFO adjusment is not required with the doFrequencyTuneSSB method, but leave for debug
+        // G8PTN: The manual BFO adjusment is not required with the doFrequencyTuneSSB method, but leave for debug
     if (bfoOn & isSSB())
     {
       currentBFO = (encoderCount == 1) ? (currentBFO + currentBFOStep) : (currentBFO - currentBFOStep);
@@ -2812,8 +2967,6 @@ void loop()
       doBrt(encoderCount);
     else if (cmdAvc)
       doAvc(encoderCount);
-    else if (cmdWifi)
-      doWifi(encoderCount);
     else if (cmdSaved)
       doSaved(encoderCount);
 
@@ -2867,6 +3020,7 @@ void loop()
       // G8PTN: Used in place of rx.frequencyUp() and rx.frequencyDown()
       if (currentMode == FM)
         currentFrequency += tabFmStep[currentStepIdx] * encoderCount;       // FM Up/Down
+  
       else
         currentFrequency += tabAmStep[currentStepIdx] * encoderCount;       // AM Up/Down
 
@@ -2965,6 +3119,14 @@ void loop()
       }
       delay(MIN_ELAPSED_TIME);
       elapsedCommand = millis();
+    } else if (pb1_long_pressed) {
+      pb1_long_pressed = false;
+      if (display_on) {
+        displayOff();
+      } else {
+        displayOn();
+      }
+      display_on = !display_on;
     }
   }
 
@@ -3024,10 +3186,11 @@ void loop()
     elapsedClick = millis();
   }
 
-  if ((millis() - lastRDSCheck) > RDS_CHECK_TIME) {
-    if ((currentMode == FM) and (snr >= 12)) checkRDS();
-    lastRDSCheck = millis();
+   if ((millis() - lastRDSCheck) > RDS_CHECK_TIME) {
+     if ((currentMode == FM) and (snr >= 12)) checkRDS();
+     lastRDSCheck = millis();
   }  
+
 
   // Show the current frequency only if it has changed
   if (itIsTimeToSave)
@@ -3068,15 +3231,10 @@ void loop()
   }
 #endif
     
-  // Run clock
-  if (isWifiEnabledAndActive()) {
-    timeClient.update();
-    hours = timeClient.getHours();
-    minutes = timeClient.getMinutes();
-    sprintf(time_disp, "%2.2d:%2.2d", hours, minutes);  
-  } else {
-    clock_time();
-  }
+  // ShowPiCode
+  rdsShowPiCode();
+  clock_time();
+
 
 #if USE_REMOTE
   // REMOTE Serial - Experimental
@@ -3137,6 +3295,8 @@ void loop()
     Serial.print(adc_read_avr);                 // V_BAT/2 (ADC average value)
     Serial.print(",");            
     Serial.println(g_remote_seqnum);            // Sequence number
+
+    //showProgramInfo();
   }
     
   if (Serial.available() > 0)
@@ -3203,6 +3363,14 @@ void loop()
           doBrt(-1);
           break;
 
+          case 'O':
+          displayOff();
+          break;
+
+        case 'o':
+          displayOn();
+          break;
+
         default:
           break;           
     }
@@ -3210,106 +3378,6 @@ void loop()
   
 #endif
 
-  if (isWifiEnabledAndActive()) {
-    server.handleClient();
-  }
   // Add a small default delay in the main loop
   delay(5);
-}
-
-void handle_OnConnect() {
-  String stringTail = " kHz";
-  String stringMode;
-  if (currentMode == AM)
-  {
-    stringMode = "AM";
-  }
-  else if (currentMode == FM)
-  {
-    stringMode = "FM";
-    stringTail = " MHz";
-  }
-  else if (currentMode == USB)
-  {
-    stringMode = "USB";
-  }
-  else
-  {
-    stringMode = "LSB";
-  }
-  
-  uint32_t freq;
-  uint16_t showFreq;
-  uint16_t tail;
-  if (currentMode == FM)
-  {
-    freq = currentFrequency/100.00;
-    showFreq   = int(freq);
-    tail  = (currentFrequency % 100);
-  } else {
-    freq  = ((currentFrequency) * 1000) + currentBFO;
-    showFreq   = freq / 1000;
-    tail  =  (freq % 1000);
-  }
-
-  server.send(200, "text/html", SendHTML(showFreq,tail,stringMode,stringTail)); 
-}
-
-void handle_NotFound(){
-  server.send(404, "text/plain", "Not found");
-}
-
-
-String SendHTML(uint16_t showFreq, uint16_t tail, String stringMode, String stringTail){
-  String ptr = "<!DOCTYPE html>";
-  ptr +="<html>";
-  ptr +="<head>";
-  ptr +="<title>SI4732 (ESP32-S3) ATS-Mini/Pocket Receiver Station</title>";
-  ptr +="<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-  ptr +="<meta http-equiv='refresh' content='60'>";
-  ptr +="<link href='https://fonts.googleapis.com/css?family=Open+Sans:300,400,600' rel='stylesheet'>";
-  ptr +="<style>";
-  ptr +="html { font-family: 'Open Sans', sans-serif; display: block; margin: 0px auto; text-align: center;color: #444444;}";
-  ptr +="body{margin: 0px;} ";
-  ptr +="h1 {margin: 50px auto 30px;} ";
-  ptr +=".side-by-side{display: table-cell;vertical-align: middle;position: relative;}";
-  ptr +=".text{font-weight: 600;font-size: 19px;width: 200px;}";
-  ptr +=".reading{font-weight: 300;font-size: 50px;padding-right: 25px;}";
-  ptr +=".frequecy .reading{color: #3B97D3;}";
-  ptr +=".superscript{font-size: 17px;font-weight: 600;position: absolute;top: 10px;}";
-  ptr +=".data{padding: 10px;}";
-  ptr +=".container{display: table;margin: 0 auto;}";
-  ptr +=".icon{width:65px}";
-  ptr +="</style>";
-  ptr +="</head>";
-  ptr +="<body>";
-  ptr +="<h1>SI4732 (ESP32-S3) ATS-Mini/Pocket Receiver Station</h1>";
-  ptr +="<div class='container'>";
-
-  ptr +="<div class='data frequecy'>";
-  ptr +="<div class='side-by-side icon'>";
-  ptr +="<svg xmlns='http://www.w3.org/2000/svg' enable-background='new 0 0 512 512' viewBox='0 0 512 512' id='radio'><g><g><linearGradient id='a' x1='284.966' x2='226.578' y1='-205.851' y2='880.166' gradientUnits='userSpaceOnUse'><stop offset='0' stop-color='#eae9fe'></stop><stop offset='.424' stop-color='#eeeefe'></stop><stop offset='.897' stop-color='#fbfbff'></stop><stop offset='1' stop-color='#fff'></stop></linearGradient><path fill='url(#a)' d='M468.836,264.275c-9.501-7.393-20.976-13.763-25.395-24.961 c-6.01-15.229,3.596-31.571,9.261-46.931c17.297-46.899-4.903-102.439-44.732-132.645 c-75.982-57.623-224.302-37.425-245.028,42.219c-8.768,33.692,6.941,72.131-9.131,103.013 c-20.278,38.966-74.073,41.594-108.719,58.921C2.169,285.358-6.419,332.1,24.365,367.686 c11.304,13.068,25.769,22.07,36.136,36.348c15.001,20.659,23.415,43.504,43.486,60.545c28.263,23.996,75.517,29.946,100.538,2.586 c14.089-15.407,18.674-38.106,34.054-52.225c20.245-18.586,52.242-16.086,78.004-6.514c25.762,9.571,49.654,25.026,76.789,29.381 c42.426,6.81,87.917-18.085,105.053-57.489S502.748,290.664,468.836,264.275z'></path><path fill='#ededed' d='M355.96,97.671L144.802,200.654c-2.397,1.198-4.953,1.757-7.589,1.757 c-1.838,0-3.755-0.319-5.593-0.879c-4.394-1.518-7.829-4.634-9.907-8.789c-1.997-4.154-2.317-8.788-0.799-13.182 c1.518-4.315,4.634-7.83,8.789-9.827l0.879-0.479l216.91-90.359c2.556-1.039,5.353-1.039,7.909,0 c2.477,1.039,4.474,3.036,5.513,5.593C363.071,89.442,360.834,95.275,355.96,97.671z'></path><path fill='#2769fd' d='M442.724,236.526v193.421c0,17.657-14.301,31.957-31.957,31.957H91.194 c-17.657,0-31.957-14.301-31.957-31.957V236.526c0-17.657,14.301-31.957,31.957-31.957h319.573 C428.423,204.568,442.724,218.869,442.724,236.526z'></path><path fill='#ededed' d='M169.39,197.144v7.424h-66.084v-7.424c0-18.248,14.793-33.042,33.042-33.042h0 C154.597,164.102,169.39,178.896,169.39,197.144z'></path><path fill='#e1e7ee' d='M271.243 333.293c0 50.519-40.961 91.593-91.593 91.593-50.519 0-91.593-41.075-91.593-91.593 0-50.633 41.075-91.707 91.593-91.707C230.283 241.586 271.243 282.661 271.243 333.293zM410.765 243.017v46.528c0 4.412-3.577 7.989-7.989 7.989h-90.18c-4.412 0-7.989-3.577-7.989-7.989v-46.528c0-4.412 3.577-7.989 7.989-7.989h90.18C407.188 235.028 410.765 238.605 410.765 243.017z'></path><path fill='#ff5859' d='M355.2,274.754v22.78h-17.786v-22.78c0-4.921,3.972-8.893,8.893-8.893S355.2,269.833,355.2,274.754 z'></path> <ellipse cx='357.686' cy='378.178' fill='#f9bb40' rx='45.256' ry='45.257' transform='rotate(-27.659 357.692 378.186)'></ellipse><path fill='#ededed' d='M331.267,339.16l19.181,19.181c3.494,3.494,3.494,9.104-0.001,12.599 c-3.494,3.494-9.103,3.494-12.598-0.001l-19.181-19.181c-3.494-3.494-3.495-9.103,0-12.598 C322.163,335.666,327.773,335.665,331.267,339.16z'></path><path fill='#ff5859' d='M396.086,84.13c0,21.174-17.13,38.377-38.304,38.377c-21.247,0-38.378-17.204-38.378-38.377 s17.13-38.377,38.378-38.377C378.956,45.753,396.086,62.956,396.086,84.13z'></path><path fill='#332e8e' d='M91.194,466.072h319.572c19.919,0,36.126-16.206,36.126-36.125V236.526 c0-19.92-16.207-36.126-36.126-36.126H173.559v-3.256c0-1.924-0.192-3.8-0.476-5.647l155.978-76.071 c7.577,6.959,17.645,11.248,28.72,11.248c23.419,0,42.473-19.086,42.473-42.545s-19.053-42.545-42.473-42.545 c-23.46,0-42.546,19.086-42.546,42.545c0,1.219,0.082,2.418,0.183,3.612l-174.17,72.555c-1.608-0.213-3.236-0.361-4.901-0.361 c-20.516,0-37.209,16.691-37.209,37.209v3.256h-7.945c-19.919,0-36.126,16.206-36.126,36.126v193.421 C55.068,449.866,71.276,466.072,91.194,466.072z M357.782,49.921c18.823,0,34.137,15.346,34.137,34.209 s-15.314,34.209-34.137,34.209c-18.863,0-34.21-15.346-34.21-34.209S338.918,49.921,357.782,49.921z M316.985,96.12 c1.374,4.667,3.537,8.987,6.32,12.84l-152.442,74.348c-3.315-8.238-9.483-15.018-17.289-19.115L316.985,96.12z M107.475,197.144 c0-15.921,12.954-28.873,28.873-28.873c15.922,0,28.876,12.952,28.876,28.873v3.256h-57.749V197.144z M63.404,236.526 c0-15.324,12.468-27.79,27.79-27.79h12.113h66.084h241.375c15.322,0,27.79,12.467,27.79,27.79v193.421 c0,15.322-12.468,27.789-27.79,27.789H91.194c-15.322,0-27.79-12.467-27.79-27.789V236.526z'></path><path fill='#332e8e' d='M179.651 429.054c52.802 0 95.761-42.958 95.761-95.761 0-52.865-42.958-95.875-95.761-95.875s-95.761 43.01-95.761 95.875C83.89 386.096 126.848 429.054 179.651 429.054zM179.651 245.754c48.206 0 87.425 39.269 87.425 87.539 0 48.206-39.219 87.425-87.425 87.425s-87.425-39.219-87.425-87.425C92.226 285.024 131.445 245.754 179.651 245.754zM312.596 301.702c33.514 0 56.706 0 90.179 0 6.705 0 12.159-5.453 12.159-12.156v-46.529c0-6.703-5.454-12.156-12.159-12.156h-90.179c-6.702 0-12.156 5.453-12.156 12.156v46.529C300.44 296.249 305.894 301.702 312.596 301.702zM341.583 293.366v-18.611c0-2.606 2.119-4.725 4.724-4.725s4.724 2.119 4.724 4.725v18.611H341.583zM308.775 243.016c0-2.107 1.715-3.82 3.82-3.82h11.25v18.674c0 2.302 1.867 4.168 4.168 4.168 2.301 0 4.168-1.865 4.168-4.168v-18.674h21.338v8.527c0 2.302 1.867 4.168 4.168 4.168 2.301 0 4.168-1.865 4.168-4.168v-8.527h21.338V256c0 2.302 1.867 4.168 4.168 4.168 2.301 0 4.168-1.865 4.168-4.168v-16.804h11.247c2.108 0 3.823 1.714 3.823 3.82v46.529c0 2.107-1.715 3.82-3.823 3.82h-43.409v-18.611c0-7.201-5.858-13.061-13.06-13.061s-13.06 5.86-13.06 13.061v18.611h-20.652c-2.106 0-3.82-1.714-3.82-3.82V243.016zM333.147 335.342c-5.129-4.146-12.661-3.895-17.425.871-4.761 4.761-5.017 12.276-.887 17.405-10.812 18.876-8.199 43.403 7.904 59.507 19.297 19.3 50.595 19.301 69.894 0 19.301-19.295 19.301-50.594 0-69.895C376.551 327.146 352.09 324.405 333.147 335.342zM321.615 342.108c1.879-1.881 4.826-1.88 6.705-.001l19.181 19.182c1.85 1.847 1.885 4.819 0 6.703-1.88 1.879-4.824 1.876-6.705 0l-19.181-19.181C319.735 346.931 319.735 343.987 321.615 342.108zM386.739 407.232c-16.042 16.042-42.065 16.042-58.107 0-12.777-12.778-15.261-31.9-7.642-47.258l13.913 13.914c5.099 5.093 13.395 5.099 18.492-.001 5.125-5.125 5.128-13.367 0-18.492l-13.962-13.962c15.47-7.756 34.565-5.051 47.307 7.692C402.784 365.168 402.781 391.19 386.739 407.232z'></path></g></g></svg>";
-  ptr +="</div>";
-  ptr +="<div class='side-by-side text'>Mode : </div>";
-  ptr +="<div class='side-by-side reading'>";
-  ptr +=(String)stringMode;
-  ptr +="<span class='superscript'></span></div>";
-  ptr +="</div>";
-  
-  ptr +="<div class='data frequecy'>";
-  ptr +="<div class='side-by-side icon'>";
-  ptr +="</div>";
-  ptr +="<div class='side-by-side text'>Frequency : </div>";
-  ptr +="<div class='side-by-side reading'>";
-  ptr +=(uint16_t)showFreq;
-  ptr +="<span class='superscript'>.";
-  ptr +=(uint16_t)tail;
-  ptr +=(String)stringTail;
-  ptr +="</span></div>";
-  ptr +="</div>";
-  
-  ptr +="</div>";
-  ptr +="</body>";
-  ptr +="</html>";
-  return ptr;
 }
