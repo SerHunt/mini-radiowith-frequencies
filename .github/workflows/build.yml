@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'ats-mini/**'
+      - 'ats-miniwith-frequencies/**'
       - '.github/workflows/build.yml'
   push:
     # tags:
