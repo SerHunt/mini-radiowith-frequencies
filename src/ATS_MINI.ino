@@ -225,7 +225,7 @@ char *stationInfo = NULL;
 
 // Battery Monitoring
 #define BATT_ADC_READS          10  // ADC reads for average calculation (Maximum value = 16 to avoid rollover in average calculation)
-#define BATT_ADC_FACTOR      1.702  // ADC correction factor used for the battery monitor
+#define BATT_ADC_FACTOR      1.782  // ADC correction factor used for the battery monitor
 #define BATT_SOC_LEVEL1      3.680  // Battery SOC voltage for 25%
 #define BATT_SOC_LEVEL2      3.780  // Battery SOC voltage for 50%
 #define BATT_SOC_LEVEL3      3.880  // Battery SOC voltage for 75%
@@ -535,64 +535,43 @@ typedef struct
 } savedFreqs;
 
 savedFreqs savedDesc[] = {
-  { "> Curr",       FM_BAND_TYPE, 10000 },
-  { "Pershe",       FM_BAND_TYPE, 8820 },
-  { "Radio NV",     FM_BAND_TYPE, 8860 },
-  { "Radio Rocks",  FM_BAND_TYPE, 8910 },
-  { "Galychyna",    FM_BAND_TYPE, 8970 },
-  { "Shlager",      FM_BAND_TYPE, 9040 },
-  { "Kiss",         FM_BAND_TYPE, 9110 },
-  { "Melodia",      FM_BAND_TYPE, 9150 },
-  { "Piatnytsia",   FM_BAND_TYPE, 9190 },
-  { "Armiya FM",    FM_BAND_TYPE, 9240 },
-  { "Relax",        FM_BAND_TYPE, 9330 },
-  { "Nostalgie",    FM_BAND_TYPE, 9700 },
-  { "Lviv.fm",      FM_BAND_TYPE, 10080 },
-  { "Krayina",      FM_BAND_TYPE, 10130 },
-  { "Hit FM",       FM_BAND_TYPE, 10170 },
-  { "Maximum",      FM_BAND_TYPE, 10210 },
-  { "Promin",       FM_BAND_TYPE, 10250 },
-  { "UA Radio",     FM_BAND_TYPE, 10330 },
-  { "Kultura",      FM_BAND_TYPE, 10390 },
-  { "Duzhe",        FM_BAND_TYPE, 10430 },
-  { "Lux FM",       FM_BAND_TYPE, 10470 },
-  { "Jazz",         FM_BAND_TYPE, 10540 },
-  { "Nashe",        FM_BAND_TYPE, 10600 },
-  { "Nezalezhnist", FM_BAND_TYPE, 10670 },
-  { "Bayraktar",    FM_BAND_TYPE, 10720 },
+   { "> Curr",       FM_BAND_TYPE, 10000 },
+  { "Vesti FM",     FM_BAND_TYPE, 10070 },
+  { "Miliceiskaia", FM_BAND_TYPE, 8790 },
+  { "Radio Rosii",  FM_BAND_TYPE, 8990 },
+  { "Dorozhnoe",    FM_BAND_TYPE, 9030 },
+  { "Uymor FM",     FM_BAND_TYPE, 9110 },
+  { "Detskoe",      FM_BAND_TYPE, 9970 },
+  { "Avtoradio",    FM_BAND_TYPE, 1025 },
+  { "City",         FM_BAND_TYPE, 1029 },
+  { "Retro",        FM_BAND_TYPE, 1033 },
+  { "Radio Ugra",   FM_BAND_TYPE, 1050 },
+  { "Russkoe Radio",FM_BAND_TYPE, 1061 },
+  { "Love",         FM_BAND_TYPE, 1067 },
+  { "Mayak",        FM_BAND_TYPE, 1070 },
+  { "Monte-Carlo",  FM_BAND_TYPE, 1073 },
+  { "Energy",       FM_BAND_TYPE, 1079 },
+  { "Nokia",        FM_BAND_TYPE, 1010 },
 };
 
 // savedFreqs savedDesc[] = {
-//   { "> Curr",       FM_BAND_TYPE, 10000 },
-//   { "EMMANUIL",     FM_BAND_TYPE, 6920 },
-//   { "MARIYA",       FM_BAND_TYPE, 6983 },
-//   { "BAYRAKTAR",    FM_BAND_TYPE, 8800 },
-//   { "Radio ROCKS",  FM_BAND_TYPE, 8930 },
-//   { "Reb-music",    FM_BAND_TYPE, 8960 },
-//   { "RELAX",        FM_BAND_TYPE, 9000 },
-//   { "AVTO RADIO",   FM_BAND_TYPE, 9040 },
-//   { "MFM",          FM_BAND_TYPE, 9120 },
-//   { "KULTURA",      FM_BAND_TYPE, 9160 },
-//   { "NAKIPILO",     FM_BAND_TYPE, 9220 },
-//   { "Slobozhanske", FM_BAND_TYPE, 9310 },
-//   { "Voroge Radio", FM_BAND_TYPE, 9630 },
-//   { "NOVOLINE",     FM_BAND_TYPE, 9710 },
-//   { "PROMIN",       FM_BAND_TYPE, 10050 },
-//   { "ARMY-FM",      FM_BAND_TYPE, 10110 },
-//   { "PEREC-FM",     FM_BAND_TYPE, 10150 },
-//   { "HIT-FM",       FM_BAND_TYPE, 10200 },
-//   { "KISS-FM",      FM_BAND_TYPE, 10240 },
-//   { "P'iatnytsia",  FM_BAND_TYPE, 10300 },
-//   { "SHLAGER",      FM_BAND_TYPE, 10350 },
-//   { "MAXIMUM",      FM_BAND_TYPE, 10400 },
-//   { "NASHE",        FM_BAND_TYPE, 10450 },
-//   { "LUX-FM",       FM_BAND_TYPE, 10520 },
-//   { "POWER-FM",     FM_BAND_TYPE, 10570 },
-//   { "UKRRADIO",     FM_BAND_TYPE, 10610 },
-//   { "DJFM",         FM_BAND_TYPE, 10660 },
-//   { "Radio NV",     FM_BAND_TYPE, 10700 },
-//   { "KRAYNA-FM",    FM_BAND_TYPE, 10740 },
-//   { "MELODIYA-FM",  FM_BAND_TYPE, 10790 },
+// { "> Curr",       FM_BAND_TYPE, 10000 },
+// { "Vesti FM",     FM_BAND_TYPE, 10070 },
+// { "Miliceiskaia", FM_BAND_TYPE, 8790 },
+// { "Radio Rosii",  FM_BAND_TYPE, 8990 },
+// { "Dorozhnoe",    FM_BAND_TYPE, 9030 },
+// { "Uymor FM",     FM_BAND_TYPE, 9110 },
+// { "Detskoe",      FM_BAND_TYPE, 9970 },
+// { "Avtoradio",    FM_BAND_TYPE, 1025 },
+// { "City",         FM_BAND_TYPE, 1029 },
+// { "Retro",        FM_BAND_TYPE, 1033 },
+// { "Radio Ugra",   FM_BAND_TYPE, 1050 },
+// { "Russkoe Radio",FM_BAND_TYPE, 1061 },
+// { "Love",         FM_BAND_TYPE, 1067 },
+// { "Mayak",        FM_BAND_TYPE, 1070 },
+// { "Monte-Carlo",  FM_BAND_TYPE, 1073 },
+// { "Energy",       FM_BAND_TYPE, 1079 },
+// { "Nokia",        FM_BAND_TYPE, 1010 }, 
 // };
 
 const int lastSavedDesc = (sizeof savedDesc / sizeof(savedFreqs)) - 1;
@@ -621,28 +600,51 @@ typedef struct
    ATTENTION: You have to RESET the eeprom after adding or removing a line of this table. 
               Turn your receiver on with the encoder push button pressed at first time to RESET the eeprom content.  
 */
+#define BAND_FM1 0
+#define BAND_FM2 1
+#define BAND_MW1 2
+#define BAND_MW2 3
+#define BAND_MW3 4
+#define BAND_80M 5
+#define BAND_SW1 6
+#define BAND_SW2 7
+#define BAND_40M 8
+#define BAND_SW3 9
+#define BAND_SW4 10
+#define BAND_SW5 11
+#define BAND_SW6 12
+#define BAND_20M 13
+#define BAND_SW7 14
+#define BAND_SW8 15
+#define BAND_15M 16
+#define BAND_SW9 17
+#define BAND_CB  18
+#define BAND_10M 19
+#define BAND_ALL 20
+
 Band band[] = {
-    {"VHF", FM_BAND_TYPE, 6400, 10800, 10390, 1, 0},
-    {"MW1", MW_BAND_TYPE, 150, 1720, 810, 3, 4},
-    {"MW2", MW_BAND_TYPE, 531, 1701, 783, 2, 4},
-    {"MW3", MW_BAND_TYPE, 1700, 3500, 2500, 1, 4},
+    {"FM1", FM_BAND_TYPE, 6400, 8750, 7200, 1, 0},
+    {"FM2", FM_BAND_TYPE, 8750, 10800, 10290, 1, 0},
+    {"LW ", MW_BAND_TYPE, 150, 1720, 810, 3, 4},
+    {"MW ", MW_BAND_TYPE, 531, 1701, 783, 2, 4},
+    {"90M", MW_BAND_TYPE, 1700, 3500, 2500, 1, 4},
     {"80M", MW_BAND_TYPE, 3500, 4000, 3700, 0, 4},
-    {"SW1", SW_BAND_TYPE, 4000, 5500, 4885, 1, 4},
-    {"SW2", SW_BAND_TYPE, 5500, 6500, 6000, 1, 4},
+    {"60M", SW_BAND_TYPE, 4000, 5500, 4885, 1, 4},
+    {"50M", SW_BAND_TYPE, 5500, 6500, 6000, 1, 4},
     {"40M", SW_BAND_TYPE, 6500, 7300, 7100, 0, 4},
-    {"SW3", SW_BAND_TYPE, 7200, 8000, 7200, 1, 4},
-    {"SW4", SW_BAND_TYPE, 9000, 11000, 9500, 1, 4},
-    {"SW5", SW_BAND_TYPE, 11100, 13000, 11900, 1, 4},
-    {"SW6", SW_BAND_TYPE, 13000, 14000, 13500, 1, 4},
+    {"41M", SW_BAND_TYPE, 7200, 8000, 7200, 1, 4},
+    {"31M", SW_BAND_TYPE, 9000, 11000, 9500, 1, 4},
+    {"25M", SW_BAND_TYPE, 11100, 13000, 11900, 1, 4},
+    {"21M", SW_BAND_TYPE, 13000, 14000, 13500, 1, 4},
     {"20M", SW_BAND_TYPE, 14000, 15000, 14200, 0, 4},
-    {"SW7", SW_BAND_TYPE, 15000, 17000, 15300, 1, 4},
-    {"SW8", SW_BAND_TYPE, 17000, 18000, 17500, 1, 4},
+    {"18M", SW_BAND_TYPE, 15000, 17000, 15300, 1, 4},
+    {"17M", SW_BAND_TYPE, 17000, 18000, 17500, 1, 4},
     {"15M", SW_BAND_TYPE, 20000, 21400, 21100, 0, 4},
-    {"SW9", SW_BAND_TYPE, 21400, 22800, 21500, 1, 4},
-    {"CB ", SW_BAND_TYPE, 26000, 28000, 27500, 0, 4},
+    {"13M", SW_BAND_TYPE, 21400, 22800, 21500, 1, 4},
+    {"CB ", SW_BAND_TYPE, 26000, 30000, 27135, 0, 4},
     {"10M", SW_BAND_TYPE, 28000, 30000, 28400, 0, 4},
-    {"ALL", SW_BAND_TYPE, 150, 30000, 15000, 0, 4} // All band. LW, MW and SW (from 150kHz to 30MHz)
-};                                             
+    {"SW ", SW_BAND_TYPE, 150, 30000, 15000, 0, 4} // All band. LW, MW and SW (from 150kHz to 30MHz)
+};
 
 const int lastBand = (sizeof band / sizeof(Band)) - 1;
 int bandIdx = 0;
@@ -650,15 +652,14 @@ int bandIdx = 0;
 //int tabStep[] = {1, 5, 10, 50, 100, 500, 1000};
 //const int lastStep = (sizeof tabStep / sizeof(int)) - 1;
 
-
 // Calibration (per band). Size needs to be the same as band[]
 // Defaults
-int16_t bandCAL[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int16_t bandCAL[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 // Mode (per band). Size needs to be the same as band[] and mode needs to be appropriate for bandType
 // Example bandType = FM_BAND_TYPE, bandMODE = FM. All other BAND_TYPE's, bandMODE = AM/LSB/USB
 // Defaults
-uint8_t bandMODE[] = {FM, AM, AM, AM, LSB, AM, AM, LSB, AM, AM, AM, AM, USB, AM, AM, USB, AM, AM, USB, AM};
+uint8_t bandMODE[] = {FM, FM, AM, AM, AM, LSB, AM, AM, LSB, AM, AM, AM, AM, USB, AM, AM, USB, AM, AM, USB, AM};
 
 char *rdsMsg;
 char *rdsTime;
